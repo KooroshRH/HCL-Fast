@@ -25,6 +25,7 @@ from utils.loggers import CsvLogger
 from datasets.utils.continual_dataset import ContinualDataset
 from models.utils.continual_model import ContinualModel
 from utils.tb_logger import TensorboardLogger
+from utils.task_accuracy_tracker import TaskAccuracyTracker
 from typing import Tuple
 from datasets import BACKBONES
 import wandb
@@ -84,6 +85,18 @@ def main(device, args):
     logger = Logger(matplotlib=args.logger.matplotlib, log_dir=args.log_dir)
     tb_logger = TensorboardLogger(args, dataset.SETTING)
     csv_logger = CsvLogger(dataset.SETTING, dataset.NAME, args.model.backbone)
+    
+    # Initialize task accuracy tracker
+    plot_dir = os.path.join(args.log_dir, "accuracy_plots")
+    task_tracker = TaskAccuracyTracker(num_tasks=dataset.N_TASKS, save_dir=plot_dir)
+    
+    # Set custom task names based on dataset
+    for task_id in range(dataset.N_TASKS):
+        if hasattr(dataset, 'TASK_NAMES') and len(dataset.TASK_NAMES) > task_id:
+            task_tracker.set_task_name(task_id, dataset.TASK_NAMES[task_id])
+        else:
+            task_tracker.set_task_name(task_id, f"Task {task_id + 1}")
+    
     accuracy = 0 
     results, results_mask_classes = [], []
 
@@ -144,6 +157,10 @@ def main(device, args):
       mean_acc = np.mean(accs, axis=1)
       print_mean_accuracy(mean_acc, t + 1, dataset.SETTING)
       
+      # Update task accuracy tracker with current results
+      # Use class-il results (accs[0]) for tracking
+      task_tracker.update_accuracies(accs[0], t)
+      
       if args.cl_default:
         model.global_model.net.module.backbone = copy.deepcopy(best_model)
       else:
@@ -165,6 +182,33 @@ def main(device, args):
     csv_logger.add_bwt(results, results_mask_classes)
     csv_logger.add_forgetting(results, results_mask_classes)
     csv_logger.write(args.ckpt_dir, vars(args))
+    
+    # Generate final accuracy trend plots
+    exp_name = f"{args.model.cl_model}_{args.dataset.name}"
+    task_tracker.plot_accuracy_trends(
+        title=f"Task Accuracies Over Time - {exp_name}",
+        filename=f"task_accuracy_trends_{exp_name}.png"
+    )
+    task_tracker.plot_forgetting_analysis(
+        filename=f"forgetting_analysis_{exp_name}.png"
+    )
+    
+    # Save tracking data and print summary
+    task_tracker.save_data(filename=f"task_accuracy_data_{exp_name}.npz")
+    summary_stats = task_tracker.get_summary_stats()
+    print("\n" + "="*60)
+    print("TASK ACCURACY TRACKING SUMMARY")
+    print("="*60)
+    print(f"Mean Final Accuracy: {summary_stats['mean_final_accuracy']:.2f}%")
+    print(f"Mean Forgetting: {summary_stats['mean_forgetting']:.2f}%")
+    print("\nFinal Accuracies per Task:")
+    for task_name, acc in summary_stats['final_accuracies'].items():
+        print(f"  {task_name}: {acc:.2f}%")
+    print("\nForgetting per Task:")
+    for task_name, forget in summary_stats['forgetting'].items():
+        print(f"  {task_name}: {forget:.2f}%")
+    print("="*60)
+    
     tb_logger.close()
     if args.eval is not False and args.cl_default is False:
         args.eval_from = model_path
