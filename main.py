@@ -179,12 +179,13 @@ def main(device, args):
       if hasattr(model, 'end_task'):
         model.end_task(dataset)
 
+    exp_name = f"{args.model.cl_model}_{args.dataset.name}"
+    
     csv_logger.add_bwt(results, results_mask_classes)
     csv_logger.add_forgetting(results, results_mask_classes)
     csv_logger.write(args.ckpt_dir, vars(args))
     
     # Generate final accuracy trend plots
-    exp_name = f"{args.model.cl_model}_{args.dataset.name}"
     task_tracker.plot_accuracy_trends(
         title=f"Task Accuracies Over Time - {exp_name}",
         filename=f"task_accuracy_trends_{exp_name}.png"
