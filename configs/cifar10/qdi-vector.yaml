@@ -1,7 +1,7 @@
-name: tinyimg-experiment-resnet18
+name: simsiam-c10-experiment-resnet18-vector
 dataset: 
-  name: seq-tinyimg
-  image_size: 64
+  name: seq-cifar10
+  image_size: 32
   num_workers: 4
 
 model: 
@@ -24,13 +24,13 @@ train:
   stop_at_epoch: 200 # has to be smaller than num_epochs
   batch_size: 32
   alpha: 1.0
-  di_var: 0.003
-  di_l2: 0.003
-  di_feature: 0.2
+  di_lr: 0.005
+  di_var: 0.001
+  di_l2: 0.
+  di_feature: 0.1
   di_itrs: 500
-  use_vector_loss: false  # Enable vector loss from Fast QDI
+  use_vector_loss: true  # Enable vector loss from Fast QDI
   vector_loss_weight: 1.0  # Weight for vector loss component
-  di_lr: 0.03
 eval: # linear evaluation, False will turn off automatic evaluation after training
   optimizer: 
     name: sgd
@@ -52,7 +52,6 @@ seed: null # None type for yaml file
 # two things might lead to stochastic behavior other than seed:
 # worker_init_fn from dataloader and torch.nn.functional.interpolate 
 # (keep this in mind if you want to achieve 100% deterministic)
-
 
 
 

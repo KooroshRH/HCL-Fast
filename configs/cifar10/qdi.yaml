@@ -29,6 +29,8 @@ train:
   di_l2: 0.
   di_feature: 0.1
   di_itrs: 500
+  use_vector_loss: false  # Enable vector loss from Fast QDI
+  vector_loss_weight: 1.0  # Weight for vector loss component
 eval: # linear evaluation, False will turn off automatic evaluation after training
   optimizer: 
     name: sgd

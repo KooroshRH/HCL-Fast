@@ -57,6 +57,8 @@ class Qdi(ContinualModel):
         self.args = args
         self.cpt = get_dataset(args).N_CLASSES_PER_TASK
         self.current_step = 0
+        self.use_vector_loss = getattr(args.train, 'use_vector_loss', False)
+        self.vector_loss_weight = getattr(args.train, 'vector_loss_weight', 1.0)
 
     def begin_task(self, task_id, dataset=None):
       if task_id:
@@ -120,10 +122,15 @@ class Qdi(ContinualModel):
         self.global_model.eval()
         self.net.eval()
 
+        deltas = []
         for step in range(self.args.train.di_itrs +1):
             self.lr_scheduler(image_opt, step)
             image_opt.zero_grad()
             self.global_model.zero_grad()
+            
+            if self.use_vector_loss:
+                image_syn_old = image_syn.clone().detach()
+            
             outputs = self.global_model.net.module.backbone(image_syn)
             loss_ce = self.loss(outputs, label_syn.long())
 
@@ -143,19 +150,39 @@ class Qdi(ContinualModel):
                 
             loss.backward()
             image_opt.step()
+            
+            if self.use_vector_loss:
+                delta = (image_syn.detach() - image_syn_old).view(image_syn.size(0), -1)
+                deltas.append(delta)
+            
             if step % 5 == 0:
                 vutils.save_image(image_syn.data.clone(),
                         f'./di_images_{self.args.dataset.name}/di_generated_{task_id}_{step//5}.png',
                         normalize=True, scale_each=True, nrow=5)
 
+        if self.use_vector_loss:
+            vector_loss = self.compute_vector_loss_fn(deltas)
+            print(f'\t Vector loss: {vector_loss.item():.6f}')
+            self.deltas = deltas
+        
         self.global_model.buffer.add_data(examples=image_syn, labels=label_syn)
         self.image_syn = image_syn.detach().clone()
         self.label_syn = label_syn.detach().clone()
+        self.compute_vector_loss = self._setup_vector_loss_computation()
         self.net.train()
+
+    def compute_vector_loss_fn(self, deltas):
+        if len(deltas) < 2:
+            return torch.tensor(0.0, device=self.device)
+        final_delta = deltas[-1]
+        avg_delta = torch.stack(deltas[:-1]).mean(dim=0).detach()
+        return F.mse_loss(final_delta, avg_delta)
+
+    def _setup_vector_loss_computation(self):
+        return self.compute_vector_loss_fn if self.use_vector_loss else lambda x: torch.tensor(0.0, device=self.device)
 
     def observe(self, inputs1, labels, inputs2, notaug_inputs, task_id):
         inputs1, labels = inputs1.to(self.device), labels.to(self.device)
-        real_batch_size = inputs1.shape[0]
 
         if task_id:
             outputs_clean = self.net.module.backbone(inputs1)
@@ -166,13 +193,16 @@ class Qdi(ContinualModel):
 
             penalty = self.criterion_kl(outputs_clean, outputs_teacher_clean) + self.criterion_kl(outputs, outputs_teacher)
             loss = self.loss(outputs_clean, labels) + self.args.train.alpha * penalty
+            
+            if self.use_vector_loss and hasattr(self, 'deltas'):
+                vector_loss = self.compute_vector_loss_fn(self.deltas)
+                loss = loss + self.vector_loss_weight * vector_loss
+                data_dict = {'loss': loss, 'penalty': penalty, 'vector_loss': vector_loss}
+            else:
+                data_dict = {'loss': loss, 'penalty': penalty}
         else:
             outputs = self.net.module.backbone(inputs1)
             loss = self.loss(outputs, labels)
-
-        if task_id:
-            data_dict = {'loss': loss, 'penalty': penalty}
-        else:
             data_dict = {'loss': loss, 'penalty': 0.}
         
         self.opt.zero_grad()
