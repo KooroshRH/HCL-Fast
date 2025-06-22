@@ -11,6 +11,7 @@
 import torch
 import numpy as np
 import random
+import os
 from utils.buffer import Buffer
 from torch.nn import functional as F
 from models.utils.continual_model import ContinualModel
@@ -105,8 +106,13 @@ class Qdi(ContinualModel):
         rand_idx = torch.randperm(self.sample_inputs.shape[0])
         sample_inputs = self.sample_inputs[rand_idx].to(self.device)
         sample_batch = sample_inputs[:self.args.model.buffer_size].to(self.device)
+        
+        # Create directory for saving images if it doesn't exist
+        di_dir = f'./di_images_{self.args.dataset.name}'
+        os.makedirs(di_dir, exist_ok=True)
+        
         vutils.save_image(sample_batch.data.clone(),
-                f'./di_images_{self.args.dataset.name}/sample_batch_{task_id}.png',
+                f'{di_dir}/sample_batch_{task_id}.png',
                 normalize=True, scale_each=True, nrow=5)
         sample_batch_size, im_size = sample_batch.shape[0], sample_batch.shape[2]
         cls_per_task = task_id * self.cpt
@@ -157,7 +163,7 @@ class Qdi(ContinualModel):
             
             if step % 5 == 0:
                 vutils.save_image(image_syn.data.clone(),
-                        f'./di_images_{self.args.dataset.name}/di_generated_{task_id}_{step//5}.png',
+                        f'{di_dir}/di_generated_{task_id}_{step//5}.png',
                         normalize=True, scale_each=True, nrow=5)
 
         if self.use_vector_loss:
